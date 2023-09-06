@@ -107,11 +107,11 @@ decCP = (`mod` coreSize) . subtract 1
 {-# INLINE decCP #-}
 
 doCommand :: Array Int Command -> BF -> IO BF
-doCommand cmds bf@(BF _ _ ip) = doCommand' (cmds ! ip) cmds bf
+doCommand cmds' bf'@(BF _ _ ip') = doCommand' (cmds' ! ip') cmds' bf'
   where
   doCommand' :: Command -> Array Int Command -> BF -> IO BF
   doCommand' Halt _ _ = undefined
-  doCommand' Ignored _ (BF c cp ip) = {-# SCC "Ignored" #-} do
+  doCommand' Ignored _ bf@(BF c cp ip) = {-# SCC "Ignored" #-} do
     when debug $ putStrLn $ "Ignored " ++ show bf
     return (BF c cp (incIP ip))
   doCommand' IncPtr _ bf@(BF c cp ip) = {-# SCC "IncPtr" #-} do
@@ -216,15 +216,15 @@ loadProgram prog = optimize (cs++[Halt])
   _  = length cs -- strictness
 
 optimize :: [Command] -> Array Int Command
-optimize cmds = listArray (0, length reduced-1) reduced
+optimize cmds' = listArray (0, length reduced-1) reduced
   where
-  reduced = phase3 . phase2 . phase1 $ cmds
+  reduced = phase3 . phase2 . phase1 $ cmds'
   -- phase1 removes ignored things
   phase1 :: [Command] -> [Command]
   phase1 = filter (/=Ignored)
   -- in phase2 group inc/dec into special instructions
   phase2 :: [Command] -> [Command]
-  phase2 cs = concatMap reduce (group cs)
+  phase2 cs' = concatMap reduce (group cs')
     where
     reduce :: [Command] -> [Command]
     reduce cs
@@ -253,13 +253,13 @@ optimize cmds = listArray (0, length reduced-1) reduced
     isJmpF (JmpForward  _) = True
     isJmpF _               = False
     calcJmpBs :: [(Int, Command)] -> [(Int, Command)]
-    calcJmpBs cmds = mapMaybe newCmd (filter (isJmpB . snd) cmds)
+    calcJmpBs intWcmds = mapMaybe newCmd (filter (isJmpB . snd) intWcmds)
       where
-      newCmd (i, c) = absJmpB (i, findPrevJmpF (map snd cmds) i (nested c))
+      newCmd (i, c) = absJmpB (i, findPrevJmpF (map snd intWcmds) i (nested c))
     calcJmpFs :: [(Int, Command)] -> [(Int, Command)]
-    calcJmpFs cmds = mapMaybe newCmd (filter (isJmpF . snd) cmds)
+    calcJmpFs intWcmds = mapMaybe newCmd (filter (isJmpF . snd) intWcmds)
       where
-      newCmd (i, c) = absJmpF (i, findNextJmpB (map snd cmds) i (nested c))
+      newCmd (i, c) = absJmpF (i, findNextJmpB (map snd intWcmds) i (nested c))
     absJmpB :: (Int, Maybe Int) -> Maybe (Int, Command)
     absJmpB (_, Nothing) = Nothing
     absJmpB (i, Just n)  = Just (i, SetIpTo (-n))
@@ -270,18 +270,18 @@ optimize cmds = listArray (0, length reduced-1) reduced
                  -> Int -- ^ nesting level to match
                  -> Maybe Int -- ^ index of next JmpF
     findPrevJmpF _    i _ | i < 0 = Nothing
-    findPrevJmpF cmds i n = case cmds !! i of
+    findPrevJmpF allCmds i n = case allCmds !! i of
                               (JmpForward l) | l == n -> Just i
-                              _ -> findPrevJmpF cmds (i-1) n
+                              _ -> findPrevJmpF allCmds (i-1) n
 
     findNextJmpB :: [Command]
                  -> Int -- ^ index to start at
                  -> Int -- ^ nesting level to match
                  -> Maybe Int -- ^ index of next JmpF
-    findNextJmpB cmds i _ | i >= length cmds = Nothing
-    findNextJmpB cmds i    n = case cmds !! i of
+    findNextJmpB allCmds i _ | i >= length allCmds = Nothing
+    findNextJmpB allCmds i    n = case allCmds !! i of
                                  (JmpBackward l) | l == n -> Just i
-                                 _ -> findNextJmpB cmds (i+1) n
+                                 _ -> findNextJmpB allCmds (i+1) n
 
 execute :: Array Int Command -> Int -> BF -> IO ()
 execute cmds n bf@(BF _ _ ip) = do
@@ -289,6 +289,7 @@ execute cmds n bf@(BF _ _ ip) = do
     then halt
     else doCommand cmds bf >>= execute cmds n
 
+halt :: IO ()
 halt = if debug
          then putStrLn "Machine Halted.\n"
          else putStrLn "\n"
