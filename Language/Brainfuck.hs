@@ -52,7 +52,7 @@ data Command = IncPtr
              | IncByteBy !Int -- ^ Increment by a set amount
              | DecByte
              | OutputByte
-         --  | InputByte
+             | InputByte
              | JmpForward  !Int -- ^ nesting level
              | JmpBackward !Int -- ^ nesting level
              | SetIpTo !Int   -- ^ Sets the instruction ptr to a specific value
@@ -81,7 +81,7 @@ decode '<' = return DecPtr
 decode '+' = return IncByte
 decode '-' = return DecByte
 decode '.' = return OutputByte
--- decode ',' = return InputByte
+decode ',' = return InputByte
 decode '[' = do n <- get
                 put (n+1)
                 return $ JmpForward n
@@ -137,16 +137,12 @@ doCommand cmds' bf'@(BF _ _ ip') = doCommand' (cmds' ! ip') cmds' bf'
     c' <- unsafeRead c cp
     putChar (word8ToChr c')
     return (BF c cp (incIP ip))
-
-{-
   doCommand' InputByte _ bf@(BF c cp ip) = {-# SCC "InputByte" #-} do
     when debug $ putStrLn $ "InputByte " ++ show bf
     c' <- getChar
     let newByte = chrToWord8 c'
     unsafeWrite c cp newByte
     return (BF c cp (incIP ip))
--}
-
   doCommand' (JmpForward n) cmds bf@(BF c cp ip) = {-# SCC "JmpForw" #-} do
     c' <- unsafeRead c cp
     case c' of
