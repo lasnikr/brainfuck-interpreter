@@ -17,14 +17,15 @@ tested-with:         GHC==8.0.1
 
 source-repository head
   type:     git
-  location: https://github.com/abbradar/brainfuck
+  location: https://github.com/lasnikr/brainfuck-interpreter
 
 executable              bf
    main-is:             Main.hs
+   other-modules:       Language.Brainfuck
    build-depends:       base>3 && <5, unix, array, mtl
 
 library
-   exposed-modules:     Language.Brainfuck, Language.Brainfuck.Examples
+   exposed-modules:     Language.Brainfuck
 
    build-depends:       base>3 && <5, array, mtl
 
