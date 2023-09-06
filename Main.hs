@@ -13,8 +13,9 @@ main = do
   run
 
 run = do
-  prog <- getContents
+  prog <- getLine
   c    <- core
   let cmds = loadProgram prog
   when debug $ print cmds
   execute cmds (snd (bounds cmds)) (BF c 0 0)
+  run

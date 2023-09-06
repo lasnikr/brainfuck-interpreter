@@ -4,6 +4,7 @@ This is an interpreter of the brainf*ck language, written in
 the pure, lazy, functional language Haskell.
 
 Copyright (C) 2006 by Jason Dagit <dagit@codersbase.com>
+Copyright (C) 2023 by Lasnikr <lasnikprogram@gmail.com>
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -16,8 +17,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
-along with this program; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1307  USA -}
+along with this program; if not, see <https://www.gnu.org/licenses/>. -}
 
 {-# LANGUAGE FlexibleContexts #-}
 module Language.Brainfuck where
@@ -27,9 +27,10 @@ import Data.Array hiding (array)
 import Data.Array.Base   (unsafeRead, unsafeWrite, array)
 import Data.Word         ( Word8 )
 import Data.Char         ( ord, chr )
-import Data.List         ( groupBy )
-import Data.Maybe        ( catMaybes )
+import Data.List         ( group )
+import Data.Maybe        ( mapMaybe )
 import Control.Monad.State
+    ( when, evalState, MonadState(put, get), State )
 
 {- | The complete BF language:
 
@@ -68,6 +69,7 @@ data BF = BF !Core !CorePtr !InstPtr
 instance Show BF where
     show (BF _ cp ip) = "BF <core> CorePtr = " ++ show cp ++ " InstPtr = " ++ show ip
 
+coreSize :: Int
 coreSize = 30000
 
 core :: IO Core
@@ -153,15 +155,15 @@ doCommand cmds bf@(BF _ _ ip) = doCommand' (cmds ! ip) cmds bf
         return (BF c cp newInstPtr)
       _ -> {-# SCC "JmpForward2" #-} do
         when debug $ putStrLn $ "JmpForward2 " ++ show bf
-        let newBF = (BF c cp (incIP ip))
+        let newBF = BF c cp (incIP ip)
         when debug $ putStrLn $ "JmpForward3" ++ show newBF
         return newBF
     where
     -- we add one to go one past the next back jump
-    newInstPtr = (nextJmp cmds ip (+1) (JmpBackward n)) + 1
+    newInstPtr = nextJmp cmds ip (+1) (JmpBackward n) + 1
   doCommand' (JmpBackward n) cmds bf@(BF c cp ip) = {-# SCC "JmpBack" #-} do
     c' <- unsafeRead c cp
-    if (c' /= 0)
+    if c' /= 0
       then do when debug $ putStrLn $ "JmpBackward1 " ++ show bf
               return (BF c cp newInstPtr)
       else do when debug $ putStrLn $ "JmpBackward2 " ++ show bf
@@ -177,10 +179,10 @@ doCommand cmds bf@(BF _ _ ip) = doCommand' (cmds ! ip) cmds bf
     -- Note: SetIpTo 0 is always a JmpBackward
     -- Because the first instruction cannot be SetIpTo 0
     if i > 0
-      then if (c' == 0)
+      then if c' == 0
              then return $ BF c cp i
              else return $ BF c cp (incIP ip)
-      else if (c' /= 0)
+      else if c' /= 0
              then return $ BF c cp (-i)
              else return $ BF c cp (incIP ip)
 
@@ -197,6 +199,7 @@ chrToWord8 = fromIntegral . ord
 word8ToChr :: Word8 -> Char
 word8ToChr = chr . fromIntegral
 
+updateByte :: MArray IOUArray Word8 m => BF -> (Word8 -> Word8) -> m BF
 updateByte (BF c cp ip) f = do
   e  <- unsafeRead c cp
   unsafeWrite c cp (f e)
@@ -209,11 +212,11 @@ loadProgram [] = array (0, 0) [(0, Halt)]
 -- adding a halt on to the end fixes a bug when called from an irc session
 loadProgram prog = optimize (cs++[Halt])
   where
-  cs = fst $ runState (mapM decode prog) 0
-  n  = length cs -- strictness
+  cs = evalState (mapM decode prog) 0
+  _  = length cs -- strictness
 
 optimize :: [Command] -> Array Int Command
-optimize cmds = listArray (0, (length reduced)-1) reduced
+optimize cmds = listArray (0, length reduced-1) reduced
   where
   reduced = phase3 . phase2 . phase1 $ cmds
   -- phase1 removes ignored things
@@ -221,7 +224,7 @@ optimize cmds = listArray (0, (length reduced)-1) reduced
   phase1 = filter (/=Ignored)
   -- in phase2 group inc/dec into special instructions
   phase2 :: [Command] -> [Command]
-  phase2 cs = concat $ map reduce $ groupBy (==) cs
+  phase2 cs = concatMap reduce (group cs)
     where
     reduce :: [Command] -> [Command]
     reduce cs
@@ -250,24 +253,24 @@ optimize cmds = listArray (0, (length reduced)-1) reduced
     isJmpF (JmpForward  _) = True
     isJmpF _               = False
     calcJmpBs :: [(Int, Command)] -> [(Int, Command)]
-    calcJmpBs cmds = catMaybes $ map newCmd (filter (isJmpB . snd) cmds)
+    calcJmpBs cmds = mapMaybe newCmd (filter (isJmpB . snd) cmds)
       where
       newCmd (i, c) = absJmpB (i, findPrevJmpF (map snd cmds) i (nested c))
     calcJmpFs :: [(Int, Command)] -> [(Int, Command)]
-    calcJmpFs cmds = catMaybes $ map newCmd (filter (isJmpF . snd) cmds)
+    calcJmpFs cmds = mapMaybe newCmd (filter (isJmpF . snd) cmds)
       where
       newCmd (i, c) = absJmpF (i, findNextJmpB (map snd cmds) i (nested c))
     absJmpB :: (Int, Maybe Int) -> Maybe (Int, Command)
     absJmpB (_, Nothing) = Nothing
-    absJmpB (i, Just n)  = Just $ (i, SetIpTo (-n))
+    absJmpB (i, Just n)  = Just (i, SetIpTo (-n))
     absJmpF (_, Nothing) = Nothing
-    absJmpF (i, Just n)  = Just $ (i, SetIpTo (n+1))
+    absJmpF (i, Just n)  = Just (i, SetIpTo (n+1))
     findPrevJmpF :: [Command]
                  -> Int -- ^ index to start at
                  -> Int -- ^ nesting level to match
                  -> Maybe Int -- ^ index of next JmpF
     findPrevJmpF _    i _ | i < 0 = Nothing
-    findPrevJmpF cmds i n = case (cmds !! i) of
+    findPrevJmpF cmds i n = case cmds !! i of
                               (JmpForward l) | l == n -> Just i
                               _ -> findPrevJmpF cmds (i-1) n
 
@@ -276,7 +279,7 @@ optimize cmds = listArray (0, (length reduced)-1) reduced
                  -> Int -- ^ nesting level to match
                  -> Maybe Int -- ^ index of next JmpF
     findNextJmpB cmds i _ | i >= length cmds = Nothing
-    findNextJmpB cmds i    n = case (cmds !! i) of
+    findNextJmpB cmds i    n = case cmds !! i of
                                  (JmpBackward l) | l == n -> Just i
                                  _ -> findNextJmpB cmds (i+1) n
 
